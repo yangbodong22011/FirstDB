@@ -5,7 +5,10 @@
 	> Created Time: 2016年04月26日 星期二 13时09分48秒
  ************************************************************************/
 
-#include<iostream>
+#ifndef FDB_DATA_BASE_CPP
+#define FDB_DATA_BASE_CPP
+
+#include"./FDB_Data_Base.h"
 using namespace std;
 
 Data_Base::Data_Base(int hash_def, int rehash_def)
@@ -32,13 +35,15 @@ void Data_Base::Data_Base_rehash()
         while (hash[i].size() != 0)
         {
             auto item = hash[i].begin();
-            rehash[(*item).get_key() % resize].push_front(*item);
+            Key_val a(*item);
+            rehash[(*item).get_hash() % resize].push_front(a);
             hash[i].erase(item);
             reused++;
             rehashhidx++;
             used--;
+            sum ++;
         }
-        if ( (++sum > rehash_default) || (rehashhidx == size))
+        if ( (sum > rehash_default) || (used == 0))
         {
             break;
         }
@@ -54,20 +59,18 @@ void Data_Base::Data_Base_rehash()
         size = resize;
         reused = 0;
         resize = 0;
+        sum = 0;
         std::vector<std::list<Key_val>>().swap(rehash);
     }
 }
 
 void Data_Base::Data_Base_add(Key_val rhs)
 {
-    if (Hash_map_find(rhs) == true)
-    {
-        Hash_map_change(rhs);
-        return ;
-    }
-
-    unsigned int key = rhs.get_key();
+    char *a = new char[rhs.get_key().size()+10];
+    FDB_Base_c_str(a, rhs.get_key());
+    unsigned int key = GetKey_char( a );
     rhs.set_hash_key(key);
+    delete []a;
     
     //当hash表的用量大于hash表大小的时候，启用rehash
     if ((rehashhidx == -1) && (used/size >= 1))
@@ -82,10 +85,14 @@ void Data_Base::Data_Base_add(Key_val rhs)
     //标志不为-1，代表rehash正在使用，将数据添加到rehash表中，并进行数据迁移
     if (rehashhidx != -1)
     {
+        if (resize == 0)
+        {
+            return ;
+        }
         rehash[key%resize].push_front(rhs);
         reused++;
         
-        Hash_map_rehash();
+        Data_Base_rehash();
     }
     else 
     {
@@ -97,20 +104,17 @@ void Data_Base::Data_Base_add(Key_val rhs)
 
 bool Data_Base::Data_Base_del(std::string rhs)
 {
-    if (Hash_map_find(rhs) == false)
-    {
-        return false;
-    }
-
-    unsigned int hash_key = GetKey_char(GET_CHAR(rhs));
-    
+    char *a = new char[rhs.size()+10];
+    FDB_Base_c_str(a, rhs);
+    unsigned int hash_key = GetKey_char( a );
+    delete []a;
     //若hash表大小是使用量的十倍则用rehash表进行对hash表减少空间的操作
-    if ((size/used >= 10) && (rehashhidx == -1))
+    if ( (used != 0) && (size/used >= 10) && (rehashhidx == -1) )
     {
         rehashhidx = 0;
         resize = size / 2;
         reused = 0;
-        std::vector<std::list<Hash_node_pseudo<T>>> vec_rehash(resize);
+        std::vector<std::list<Key_val>> vec_rehash(resize);
         rehash = vec_rehash;
     }
 
@@ -120,29 +124,30 @@ bool Data_Base::Data_Base_del(std::string rhs)
         auto item = rehash[hash_key % resize].begin();
         while(item != rehash[hash_key % resize].end())
         {
-            if (rhs.Hash_key() == (*item).Hash_key())
+            if (rhs == (*item).get_key())
             {
                 hash[hash_key % resize].erase(item);
                 reused--;
-                return;
+                Data_Base_rehash();
+                return true;
             }
             else
             {
                 item++;
             }
         }
-        Hash_map_rehash();
+        Data_Base_rehash();
     }
 
     //在hash表中进行delete操作
     auto item = hash[hash_key % size].begin();
     while(item != hash[hash_key % size].end())
     {
-        if (rhs.Hash_key() == (*item).Hash_key())
+       if ( rhs == (*item).get_key() )
         {
             hash[hash_key % size].erase(item);
             used --;
-            return;
+            return true;
         }
         else 
         {  
@@ -151,6 +156,460 @@ bool Data_Base::Data_Base_del(std::string rhs)
     }   
 }
 
+void Data_Base::Data_Base_update(Key_val rhs)
+{
+    Data_Base_del(rhs.get_key());
+    Data_Base_add(rhs);
+}
+
+void Data_Base::Data_Base_destory()
+{
+    //用swap的方法对vector容器进行销毁工作（因为clear函数无法减少容器进行的预分配）
+    std::vector<std::list<Key_val>>().swap(hash);
+    std::vector<std::list<Key_val>>().swap(rehash);
+
+    //重新对hash表进行初始化
+    std::vector<std::list<Key_val>> vec(HASH_MIN);
+
+    used = 0;
+    size = HASH_MIN;
+    hash = vec;
+    resize = 0;
+    reused = 0;
+    rehashhidx = -1;
+}
+
+
+bool Data_Base::Data_Base_find(std::string rhs)
+{
+    char *a = new char[rhs.size()+10];
+    FDB_Base_c_str(a, rhs);
+    unsigned int key = GetKey_char( a );
+    delete []a;
+
+    for (auto item : hash[key % size])
+    {
+        if (rhs == item.get_key())
+        {
+            return true;
+        }
+    }
+    
+    if (rehashhidx != -1)
+    {
+        for (auto item : rehash[key % resize])
+        {
+            if (rhs == item.get_key())
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool Data_Base::Data_Base_type_compare(std::string rhs, int type)
+{    
+    char *a = new char[rhs.size()+10];
+    FDB_Base_c_str(a, rhs);
+    unsigned int key = GetKey_char( a );
+    delete []a;
+
+    for (auto item : hash[key % size])
+    {
+        if (rhs == item.get_key())
+        {
+            if (type == item.get_type()) 
+            {
+                return true;
+            }
+            return false;
+        }
+    }
+    
+    if (rehashhidx != -1)
+    {
+        for (auto item : rehash[key % resize])
+        {
+            if (rhs == item.get_key())
+            {
+                if (type == item.get_type()) 
+                {
+                    return true;
+                }
+                return false;
+            }
+        }
+    }
+
+    return false;
+}
+
+unsigned int Data_Base::Data_Base_size()
+{
+    return used + reused;
+}
+
+bool Data_Base::Data_Base_value_add(std::string rhs, void *obj)
+{    
+    char *a = new char[rhs.size()+10];
+    FDB_Base_c_str(a, rhs);
+    unsigned int key = GetKey_char( a );
+    delete []a;
+
+    for (auto item = hash[key % size].begin(); item != hash[key % size].end(); item++) //gouzaole
+    {
+        if (rhs == (*item).get_key())
+        {
+            (*item).Key_val_add(obj);
+            return true;
+        }
+    }
+
+    if (rehashhidx != -1)
+    {
+        Data_Base_rehash();
+        for (auto item = rehash[key % resize].begin(); item != rehash[key % resize].end(); item++)
+        {
+            if (rhs == (*item).get_key())
+            {
+                (*item).Key_val_add(obj);
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool Data_Base::Data_Base_value_del(std::string rhs, void *obj)
+{       
+    char *a = new char[rhs.size()+10];
+    FDB_Base_c_str(a, rhs);
+    unsigned int key = GetKey_char( a );
+    delete []a;
+
+    for (auto item = hash[key % size].begin(); item != hash[key % size].end(); item++)
+    {
+        if (rhs == (*item).get_key())
+        {
+            if ((*item).Key_val_del(obj) == false)
+            {
+                return false;
+            }
+            return true;
+        }
+    }
+
+    if (rehashhidx != -1)
+    {
+        Data_Base_rehash();
+        for (auto item = rehash[key % resize].begin(); item != rehash[key % resize].end(); item++)
+        {
+            if (rhs == (*item).get_key())
+            {
+                if ((*item).Key_val_del(obj) == false)
+                {
+                    return false;
+                }
+                return true;
+            }
+        }
+    }
+    
+    return false;
+}
+
+bool Data_Base::Data_Base_value_value(std::string rhs, void *buff)
+{ 
+    char *a = new char[rhs.size()+10];
+    FDB_Base_c_str(a, rhs);
+    unsigned int key = GetKey_char( a );
+    delete []a;
+
+    for (auto item = hash[key % size].begin(); item != hash[key % size].end(); item++)
+    {
+        if (rhs == (*item).get_key())
+        {
+            (*item).Key_val_value(buff);
+            return true;
+        }
+    }
+
+    if (rehashhidx != -1)
+    {
+        Data_Base_rehash();
+        for (auto item = rehash[key % resize].begin(); item != rehash[key % resize].end(); item++)
+        {
+            if (rhs == (*item).get_key())
+            {
+                (*item).Key_val_value(buff);
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool Data_Base::Data_Base_value_destory(std::string rhs)
+{
+    char *a = new char[rhs.size()+10];
+    FDB_Base_c_str(a, rhs);
+    unsigned int key = GetKey_char( a );
+    delete []a;
+
+    for (auto item = hash[key % size].begin(); item != hash[key % size].end(); item++)
+    {
+        if (rhs == (*item).get_key())
+        {
+            (*item).Key_val_destory();
+            return true;
+        }
+    }
+
+    if (rehashhidx != -1)
+    {
+        Data_Base_rehash();
+        for (auto item = rehash[key % resize].begin(); item != rehash[key % resize].end(); item++)
+        {
+            if (rhs == (*item).get_key())
+            {
+                (*item).Key_val_destory();
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+unsigned int Data_Base::Data_Base_value_size(std::string rhs)
+{
+    char *a = new char[rhs.size()+10];
+    FDB_Base_c_str(a, rhs);
+    unsigned int key = GetKey_char( a );
+    delete []a;
+
+    for (auto item = hash[key % size].begin(); item != hash[key % size].end(); item++)
+    {
+        if (rhs == (*item).get_key())
+        {
+            return (*item).Key_val_size();
+        }
+    }
+
+    if (rehashhidx != -1)
+    {
+        for (auto item = rehash[key % resize].begin(); item != rehash[key % resize].end(); item++)
+        {
+            if (rhs == (*item).get_key())
+            {
+                return (*item).Key_val_size();
+            }
+         }
+    }
+}
+
+bool Data_Base::Data_Base_add_time(std::string rhs, long long time)
+{
+    char *a = new char[rhs.size()+10];
+    FDB_Base_c_str(a, rhs);
+    unsigned int key = GetKey_char( a );
+    delete []a;
+
+    for (auto item = hash[key % size].begin(); item != hash[key % size].end(); item++)
+    {
+        if (rhs == (*item).get_key())
+        {
+            (*item).add_cut_time(time);
+            return true;
+        }
+    }
+
+    if (rehashhidx != -1)
+    {
+        Data_Base_rehash();
+        for (auto item = rehash[key % resize].begin(); item != rehash[key % resize].end(); item++)
+        {
+            if (rhs == (*item).get_key())
+            {
+                (*item).add_cut_time(time);
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool Data_Base::Data_Base_add_ptime(std::string rhs, long long time)
+{
+    char *a = new char[rhs.size()+10];
+    FDB_Base_c_str(a, rhs);
+    unsigned int key = GetKey_char( a );
+    delete []a;
+
+    for (auto item = hash[key % size].begin(); item != hash[key % size].end(); item++)
+    {
+        if (rhs == (*item).get_key())
+        {
+            (*item).add_cut_ptime(time);
+            return true;
+        }
+    }
+
+    if (rehashhidx != -1)
+    {
+        Data_Base_rehash();
+        for (auto item = rehash[key % resize].begin(); item != rehash[key % resize].end(); item++)
+        {
+            if (rhs == (*item).get_key())
+            {
+                (*item).add_cut_ptime(time);
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool Data_Base::Data_Base_set_time(std::string rhs, long long time)
+{
+    char *a = new char[rhs.size()+10];
+    FDB_Base_c_str(a, rhs);
+    unsigned int key = GetKey_char( a );
+    delete []a;
+
+    for (auto item = hash[key % size].begin(); item != hash[key % size].end(); item++)
+    {
+        if (rhs == (*item).get_key())
+        {
+            (*item).set_cut_time(time);
+            return true;
+        }
+    }
+
+    if (rehashhidx != -1)
+    {
+        Data_Base_rehash();
+        for (auto item = rehash[key % resize].begin(); item != rehash[key % resize].end(); item++)
+        {
+            if (rhs == (*item).get_key())
+            {
+                (*item).set_cut_time(time);
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+bool Data_Base::Data_Base_set_ptime(std::string rhs,long long time)
+{    
+    char *a = new char[rhs.size()+10];
+    FDB_Base_c_str(a, rhs);
+    unsigned int key = GetKey_char( a );
+    delete []a;
+
+    for (auto item = hash[key % size].begin(); item != hash[key % size].end(); item++)
+    {
+        if (rhs == (*item).get_key())
+        {
+            (*item).set_cut_ptime(time);
+            return true;
+        }
+    }
+
+    if (rehashhidx != -1)
+    {
+        Data_Base_rehash();
+        for (auto item = rehash[key % resize].begin(); item != rehash[key % resize].end(); item++)
+        {
+            if (rhs == (*item).get_key())
+            {
+                (*item).set_cut_ptime(time);
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+long long Data_Base::Data_Base_get_time(std::string rhs)
+{
+    char *a = new char[rhs.size()+10];
+    FDB_Base_c_str(a, rhs);
+    unsigned int key = GetKey_char( a );
+    delete []a;
+
+    for (auto item = hash[key % size].begin(); item != hash[key % size].end(); item++)
+    {
+        if (rhs == (*item).get_key())
+        {
+            return (*item).get_cut_time();
+        }
+    }
+
+    if (rehashhidx != -1)
+    {
+        Data_Base_rehash();
+        for (auto item = rehash[key % resize].begin(); item != rehash[key % resize].end(); item++)
+        {
+            if (rhs == (*item).get_key())
+            {
+                return (*item).get_cut_time();
+            }
+        }
+    }
+}
+
+char* Data_Base::FDB_Base_c_str(char *a, std::string rhs)
+{
+    strcpy(a, rhs.c_str());
+    for (int i = rhs.size(); i < rhs.size()+10; i++)
+    {
+         a[i] = 0;
+    }
+    return a;
+}
+
+void Data_Base::Data_Base_show()
+{
+    std::cout << "hash: " << std::endl;
+    std::cout << "size: " << size << " used: " << used << " hash_size: " << hash.size() << std::endl;
+    int i = 0;
+    for (auto item : hash)
+    {
+        //std::cout << item.size() << std::endl; 
+        for (auto it : item)
+        {
+            std::cout << i << " : " << std::endl;
+            std::cout << it.get_key() << "---" << it.get_hash() << std::endl;
+        }
+        i++;
+    }
+
+    std::cout << "rehash: " << std::endl;
+    std::cout << "resize: " << size << " reused: " << reused << " rehash_size: " <<  rehash.size() << std::endl;
+    i = 0;
+    for (auto item : rehash)
+    {
+        for (auto it : item)
+        {
+            std::cout << i << " : " << endl;
+            std::cout << it.get_key() << "---" << it.get_hash() << std::endl;
+        }
+        i++;
+    }
+    std::cout << "rehashhidx: " << rehashhidx << std::endl;
+    std::cout << "rehash_default: " << rehash_default << std::endl;
+    std::cout << "-----------------------------" << std::endl;
+}
 
 unsigned int Data_Base::GetKey_int(unsigned int key){
     key += ~(key << 15);
@@ -196,3 +655,4 @@ unsigned int Data_Base::GetKey_char(const void *key){
     return (unsigned int )h;
 }
 
+#endif

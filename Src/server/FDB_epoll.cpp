@@ -9,7 +9,7 @@
 #include"./FDB_epoll.h"
 #include"./FDB_accept.h"
 #include<thread>
-
+#include"./FDB_json.h"
 using namespace std;
 extern User user;
 
@@ -176,30 +176,39 @@ bool Epoll::Epoll_wait(){                                 /*epoll 核心wait*/
             }else if(event_s[i].events & EPOLLIN){
             
                 /*测试读取信,此处应当包含一个md5解密和一个JSon解析模块*/
+                /*第一阶段设计，在EPOLLIN 这里直接处理请求并回复*/
+                /*第二阶段设计，添加备机，组装节点*/
+                /*第三阶段设计，组织分布式存储结构*/
                 char buf[1024];
                 //std::cout <<"ths id : " <<std::this_thread::get_id() << std::endl;
                 /*
                 Epoll_set_EPOLLOUT(connfd);
                 */
-                std::cout << "id = events " << event_s[i].data.fd << " " << std::endl;
+                //std::cout << "id = events " << event_s[i].data.fd << " " << std::endl;
                 read(event_s[i].data.fd,buf,1024);
-                std::cout << buf << std::endl;
-                bzero(buf,1024);
-                std::string bu(700000,'c');
-                int flag;
+                fdb_json A;
+                A.json_tostr(buf);
+                string store;
+                store = db.handle(A.get_comm_name(),A.get_key(),A.get_value(),A.get_jadd());
+                memset(buf,0,1024);
+                memcpy(buf,store.c_str(),1024);
+                write(event_s[i].data.fd,buf,1024);
+                //bzero(buf,1024);
+                //std::string bu(700000,'c');
+                //int flag;
                 //std::cout << bu << std::endl;
-                flag = user.User_return(connfd).Accept_Write(bu);
-                std::cout << flag << std::endl;
-                if(user.User_return(connfd).Accept_return_flag()){
+                //flag = user.User_return(connfd).Accept_Write(bu);
+                //std::cout << flag << std::endl;
+                /*if(user.User_return(connfd).Accept_return_flag()){
                     
                     std::cout << "PPPPPP" << std::endl;
                     Epoll_set_EPOLLOUT(connfd);
                     
-                }else{  
+                }else{*/  
                     
                     Epoll_reset(event_s[i].data.fd);
 
-                }   
+                //}   
 
             }else if(event_s[i].events & EPOLLOUT){
                 
@@ -239,5 +248,16 @@ bool Epoll::Epoll_getMAX_NUM(){                     /*epoll 最大监听套接�
     
 
 }*/
+
+
+bool Epoll::work(int sockfd,std::string string,char *buf){
+    
+
+
+
+}
+
+
+
 
 
